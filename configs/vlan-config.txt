@@ -1,0 +1,291 @@
+! =============================================================
+! VLAN CONFIGURATION
+! Enterprise Network Security Architecture Lab
+! Cisco Packet Tracer 8.2 | Implemented: Oct-Dec 2024
+! =============================================================
+
+! -----------------------------------------------------------
+! CORE SWITCH (SW-CORE) - Cisco Catalyst 3560
+! -----------------------------------------------------------
+
+SW-CORE> enable
+SW-CORE# configure terminal
+
+! Create VLANs
+vlan 10
+ name HR
+!
+vlan 20
+ name Finance-Marketing
+!
+vlan 30
+ name IT-Admin
+!
+vlan 40
+ name Servers
+!
+vlan 99
+ name Management
+!
+
+! SVIs (Layer 3 interfaces for inter-VLAN routing on core switch)
+interface Vlan10
+ description HR VLAN Gateway
+ ip address 192.168.10.1 255.255.255.0
+ no shutdown
+!
+interface Vlan20
+ description Finance-Marketing VLAN Gateway
+ ip address 192.168.20.1 255.255.255.0
+ no shutdown
+!
+interface Vlan30
+ description IT-Admin VLAN Gateway
+ ip address 192.168.30.1 255.255.255.0
+ no shutdown
+!
+interface Vlan40
+ description Servers VLAN Gateway
+ ip address 192.168.40.1 255.255.255.0
+ no shutdown
+!
+interface Vlan99
+ description Management VLAN Gateway
+ ip address 192.168.99.1 255.255.255.0
+ no shutdown
+!
+
+! Enable IP routing on L3 switch
+ip routing
+
+! Uplink to Core Router (for internet/NAT)
+interface GigabitEthernet0/1
+ description Uplink to Core Router
+ no switchport
+ ip address 10.0.0.2 255.255.255.252
+ no shutdown
+!
+
+! Default route toward core router
+ip route 0.0.0.0 0.0.0.0 10.0.0.1
+
+! Trunk port to Distribution Switch - Building A
+interface GigabitEthernet0/2
+ description Trunk to DIST-A
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,99
+ no shutdown
+!
+
+! Trunk port to Distribution Switch - Building B
+interface GigabitEthernet0/3
+ description Trunk to DIST-B
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,30,99
+ no shutdown
+!
+
+! Trunk port to Distribution Switch - Building C
+interface GigabitEthernet0/4
+ description Trunk to DIST-C
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,30,40,99
+ no shutdown
+!
+
+! Management interface
+interface Vlan99
+ ip address 192.168.99.1 255.255.255.0
+!
+
+end
+write memory
+
+! -----------------------------------------------------------
+! DISTRIBUTION SWITCH - Building A (DIST-A)
+! One-story building: HR + Conference Room
+! Cisco Catalyst 2960
+! -----------------------------------------------------------
+
+DIST-A> enable
+DIST-A# configure terminal
+
+vlan 10
+ name HR
+!
+vlan 99
+ name Management
+!
+
+! Uplink trunk to Core Switch
+interface GigabitEthernet0/1
+ description Trunk Uplink to SW-CORE
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,99
+ no shutdown
+!
+
+! Downlink trunk to Access Switch - Building A Floor 1
+interface GigabitEthernet0/2
+ description Trunk to ACC-A-F1
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,99
+ no shutdown
+!
+
+! Management SVI
+interface Vlan99
+ ip address 192.168.99.11 255.255.255.0
+ no shutdown
+!
+
+ip default-gateway 192.168.99.1
+
+end
+write memory
+
+! -----------------------------------------------------------
+! DISTRIBUTION SWITCH - Building B (DIST-B)
+! Five-story office building: Finance + Marketing
+! Cisco Catalyst 2960
+! -----------------------------------------------------------
+
+DIST-B> enable
+DIST-B# configure terminal
+
+vlan 20
+ name Finance-Marketing
+!
+vlan 99
+ name Management
+!
+
+! Uplink to Core Switch
+interface GigabitEthernet0/1
+ description Trunk Uplink to SW-CORE
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+
+! Downlinks to per-floor access switches (5 floors)
+interface GigabitEthernet0/2
+ description Trunk to ACC-B-F1
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+interface GigabitEthernet0/3
+ description Trunk to ACC-B-F2
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+interface GigabitEthernet0/4
+ description Trunk to ACC-B-F3
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+interface GigabitEthernet0/5
+ description Trunk to ACC-B-F4
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+interface GigabitEthernet0/6
+ description Trunk to ACC-B-F5
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+
+interface Vlan99
+ ip address 192.168.99.12 255.255.255.0
+ no shutdown
+!
+ip default-gateway 192.168.99.1
+
+end
+write memory
+
+! -----------------------------------------------------------
+! ACCESS SWITCH - Building B, Floor 1 (ACC-B-F1)
+! End devices: computers, printers, IP phones (Finance)
+! Cisco Catalyst 2960
+! -----------------------------------------------------------
+
+ACC-B-F1> enable
+ACC-B-F1# configure terminal
+
+vlan 20
+ name Finance-Marketing
+!
+vlan 99
+ name Management
+!
+
+! Uplink to distribution switch
+interface GigabitEthernet0/1
+ description Trunk Uplink to DIST-B
+ switchport mode trunk
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 20,99
+ no shutdown
+!
+
+! End device ports - Finance workstations
+interface range FastEthernet0/1 - 20
+ description Finance Workstation Ports
+ switchport mode access
+ switchport access vlan 20
+ switchport nonegotiate
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+!
+
+! Printer ports
+interface range FastEthernet0/21 - 23
+ description Printer Ports
+ switchport mode access
+ switchport access vlan 20
+ switchport nonegotiate
+ spanning-tree portfast
+ no shutdown
+!
+
+! Port security on user ports (limit to 1 MAC per port)
+interface range FastEthernet0/1 - 23
+ switchport port-security maximum 1
+ switchport port-security violation restrict
+ switchport port-security
+!
+
+! Management SVI
+interface Vlan99
+ ip address 192.168.99.21 255.255.255.0
+ no shutdown
+!
+ip default-gateway 192.168.99.1
+
+end
+write memory
+
+! NOTE: Same config pattern applies to ACC-B-F2 through F5 (mgmt IPs .22-.25)
+! and Building C distribution/access switches (mgmt range .30-.40)
+! Building C also includes VLAN 30 (IT-Admin) on floors 4-5

@@ -1,0 +1,142 @@
+! =============================================================
+! CORE ROUTER CONFIGURATION
+! Device: Cisco 2911 (RT-CORE)
+! Role: Edge routing, NAT, firewall uplink, inter-building path
+! =============================================================
+
+RT-CORE> enable
+RT-CORE# configure terminal
+
+hostname RT-CORE
+
+! -----------------------------------------------------------
+! Interface Configuration
+! -----------------------------------------------------------
+
+! WAN interface toward ISP (outside NAT)
+interface GigabitEthernet0/0
+ description WAN - ISP Uplink
+ ip address 203.0.113.2 255.255.255.252
+ ! 203.0.113.0/24 is TEST-NET-3 per RFC 5737 - documentation use only
+ ip nat outside
+ no shutdown
+!
+
+! LAN interface toward Core Switch
+interface GigabitEthernet0/1
+ description LAN - Trunk to SW-CORE
+ ip address 10.0.0.1 255.255.255.252
+ ip nat inside
+ no shutdown
+!
+
+! Serial interface (if WAN is serial link instead of Gi)
+! interface Serial0/0/0
+!  description WAN - Serial to ISP
+!  ip address 203.0.113.2 255.255.255.252
+!  ip nat outside
+!  clock rate 64000
+!  no shutdown
+
+! -----------------------------------------------------------
+! Routing
+! -----------------------------------------------------------
+
+! Default route to ISP
+ip route 0.0.0.0 0.0.0.0 203.0.113.1
+
+! Static routes back to internal VLANs (via core switch)
+ip route 192.168.10.0 255.255.255.0 10.0.0.2
+ip route 192.168.20.0 255.255.255.0 10.0.0.2
+ip route 192.168.30.0 255.255.255.0 10.0.0.2
+ip route 192.168.40.0 255.255.255.0 10.0.0.2
+ip route 192.168.99.0 255.255.255.0 10.0.0.2
+
+! -----------------------------------------------------------
+! NAT Configuration (overload/PAT - see dhcp-nat-config.txt for detail)
+! -----------------------------------------------------------
+
+! ACL defining traffic to be NAT'd (all internal VLANs)
+ip access-list standard NAT-INSIDE-SOURCES
+ permit 192.168.10.0 0.0.0.255
+ permit 192.168.20.0 0.0.0.255
+ permit 192.168.30.0 0.0.0.255
+ permit 192.168.40.0 0.0.0.255
+
+! NAT overload using WAN IP
+ip nat inside source list NAT-INSIDE-SOURCES interface GigabitEthernet0/0 overload
+
+! -----------------------------------------------------------
+! Security Hardening
+! -----------------------------------------------------------
+
+! Disable unused services
+no service pad
+no service finger
+no ip http server
+no ip http secure-server
+no ip source-route
+no ip proxy-arp
+
+! Disable CDP on WAN-facing interface
+interface GigabitEthernet0/0
+ no cdp enable
+
+! Console line security
+line console 0
+ password [REDACTED - use strong password in production]
+ login
+ exec-timeout 5 0
+ logging synchronous
+!
+
+! VTY lines - SSH only, restrict to management VLAN
+line vty 0 4
+ transport input ssh
+ access-class MGMT-ACCESS in
+ login local
+ exec-timeout 5 0
+!
+
+! Local admin account (use AAA/RADIUS in production)
+username admin privilege 15 secret [REDACTED]
+
+! Enable SSHv2
+ip domain-name campus.local
+crypto key generate rsa modulus 2048
+ip ssh version 2
+ip ssh time-out 60
+ip ssh authentication-retries 3
+
+! ACL restricting VTY access to IT Admin subnet only
+ip access-list standard MGMT-ACCESS
+ permit 192.168.30.0 0.0.0.255
+ deny any log
+
+! -----------------------------------------------------------
+! Logging
+! -----------------------------------------------------------
+
+logging buffered 16384 warnings
+! In production: logging host 192.168.40.50 (syslog server)
+service timestamps log datetime msec localtime show-timezone
+
+! -----------------------------------------------------------
+! NTP
+! -----------------------------------------------------------
+
+ntp server 203.0.113.100
+! Or use pool.ntp.org if internet-accessible
+
+! -----------------------------------------------------------
+! Verification Commands
+! -----------------------------------------------------------
+
+! show ip nat translations
+! show ip nat statistics
+! show ip route
+! show ip interface brief
+! show version
+
+end
+write memory

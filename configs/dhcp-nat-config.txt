@@ -1,0 +1,162 @@
+! =============================================================
+! DHCP AND NAT CONFIGURATION
+! DHCP: Centralized server in VLAN 40 (192.168.40.10)
+! NAT: PAT at core router (RT-CORE)
+! =============================================================
+!
+! Architecture choice: Centralized DHCP vs. per-VLAN DHCP server
+!
+! Could have put a DHCP server in each VLAN — simpler ACL story,
+! no relay dependency. But one centralized server in VLAN 40 means:
+!   - One place to look for lease issues
+!   - One place to update pool config
+!   - Easier to audit what's been assigned where
+! The tradeoff is the relay dependency and the ACL requirement to allow
+! UDP 67/68 from each VLAN to reach 192.168.40.10. Both are manageable.
+! =============================================================
+
+! -----------------------------------------------------------
+! DHCP SERVER CONFIGURATION
+! Configured on Cisco IOS router acting as DHCP server
+! (In Packet Tracer: configured on server device GUI, or on router)
+! -----------------------------------------------------------
+
+! Exclude addresses reserved for network devices / static assignments
+ip dhcp excluded-address 192.168.10.1 192.168.10.20
+ip dhcp excluded-address 192.168.20.1 192.168.20.20
+ip dhcp excluded-address 192.168.30.1 192.168.30.20
+ip dhcp excluded-address 192.168.40.1 192.168.40.20
+ip dhcp excluded-address 192.168.99.1 192.168.99.20
+
+! VLAN 10 - HR Pool
+ip dhcp pool VLAN10-HR
+ network 192.168.10.0 255.255.255.0
+ default-router 192.168.10.1
+ dns-server 192.168.40.20
+ domain-name campus.local
+ lease 1
+ ! 1-day lease — shorter lease = faster reclaim of stale addresses
+ ! Also means slightly more DHCP traffic. Fine for a campus this size.
+
+! VLAN 20 - Finance/Marketing Pool
+ip dhcp pool VLAN20-FINANCE
+ network 192.168.20.0 255.255.255.0
+ default-router 192.168.20.1
+ dns-server 192.168.40.20
+ domain-name campus.local
+ lease 1
+
+! VLAN 30 - IT Admin Pool
+ip dhcp pool VLAN30-IT
+ network 192.168.30.0 255.255.255.0
+ default-router 192.168.30.1
+ dns-server 192.168.40.20
+ domain-name campus.local
+ lease 1
+
+! VLAN 40 - Servers Pool (most server IPs are static, but keep pool for flexibility)
+ip dhcp pool VLAN40-SERVERS
+ network 192.168.40.0 255.255.255.0
+ default-router 192.168.40.1
+ dns-server 192.168.40.20
+ domain-name campus.local
+ lease 7
+ ! Longer lease for servers - they don't move, saves DHCP churn
+
+! -----------------------------------------------------------
+! DHCP RELAY (ip helper-address) on Core Switch SVIs
+! Without this, DHCP broadcasts from each VLAN don't reach the
+! centralized DHCP server in VLAN 40
+! -----------------------------------------------------------
+
+! On SW-CORE:
+interface Vlan10
+ ip helper-address 192.168.40.10
+!
+interface Vlan20
+ ip helper-address 192.168.40.10
+!
+interface Vlan30
+ ip helper-address 192.168.40.10
+!
+! Note: VLAN 40 itself doesn't need a relay (server is in this VLAN)
+! Note: VLAN 99 (management) uses static IPs, no DHCP needed
+
+! -----------------------------------------------------------
+! DHCP SNOOPING (Not implemented in initial lab - documented as gap)
+! Should be enabled on all access switches to prevent rogue DHCP
+! -----------------------------------------------------------
+
+! Template for access switches (ACC-B-F1 etc):
+!
+! ip dhcp snooping
+! ip dhcp snooping vlan 10,20,30,40
+! no ip dhcp snooping information option
+! !
+! ! Trust only the uplink port (toward distribution switch)
+! interface GigabitEthernet0/1
+!  ip dhcp snooping trust
+! !
+! ! Rate-limit DHCP on untrusted (client) ports
+! interface range FastEthernet0/1 - 24
+!  ip dhcp snooping limit rate 15
+!
+! Note: "no ip dhcp snooping information option" disables Option 82 insertion.
+! Some DHCP servers handle Option 82 poorly. Disable unless you specifically
+! need it. Found this out the hard way when DHCP stopped working after
+! enabling snooping — Option 82 was being added and the server was rejecting
+! requests with unknown options.
+
+! -----------------------------------------------------------
+! NAT CONFIGURATION (on RT-CORE)
+! PAT - all internal VLANs share the single WAN IP
+! -----------------------------------------------------------
+
+! Standard ACL identifying traffic eligible for NAT
+! (all internal RFC 1918 ranges used in this design)
+ip access-list standard NAT-INSIDE-SOURCES
+ 10 permit 192.168.10.0 0.0.0.255
+ 20 permit 192.168.20.0 0.0.0.255
+ 30 permit 192.168.30.0 0.0.0.255
+ 40 permit 192.168.40.0 0.0.0.255
+ 50 deny any
+
+! NAT overload (PAT) - maps all inside sources to WAN interface IP
+ip nat inside source list NAT-INSIDE-SOURCES interface GigabitEthernet0/0 overload
+
+! Interface designations
+interface GigabitEthernet0/0
+ ip nat outside
+!
+interface GigabitEthernet0/1
+ ip nat inside
+
+! -----------------------------------------------------------
+! STATIC NAT ENTRIES (if any servers need inbound access)
+! -----------------------------------------------------------
+
+! Example: If the internal web server needs to be reachable externally
+! ip nat inside source static tcp 192.168.40.30 80 203.0.113.2 80
+! ip nat inside source static tcp 192.168.40.30 443 203.0.113.2 443
+!
+! For this lab, no inbound NAT is configured — all traffic is
+! outbound only. Internal servers are not externally accessible.
+
+! -----------------------------------------------------------
+! VERIFICATION
+! -----------------------------------------------------------
+
+! DHCP verification:
+! show ip dhcp pool
+! show ip dhcp binding         ! See what IP was assigned to which MAC
+! show ip dhcp statistics      ! Check for failures, requests, acks
+! show ip dhcp conflict        ! Any IP address conflicts detected?
+! debug ip dhcp server events  ! Verbose (use with caution in production)
+
+! NAT verification:
+! show ip nat translations     ! Active NAT table entries
+! show ip nat statistics       ! Hit counts, misses
+! debug ip nat                 ! Very verbose - only in lab
+
+! Relay verification:
+! show ip interface Vlan10     ! Look for "Helper address is 192.168.40.10"

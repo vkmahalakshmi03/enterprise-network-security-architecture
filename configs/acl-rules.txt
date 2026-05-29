@@ -1,0 +1,205 @@
+! =============================================================
+! ACCESS CONTROL LIST CONFIGURATION
+! Enterprise Network Security Architecture Lab
+! Applied on: Core Switch SVIs (inter-VLAN routing point)
+! =============================================================
+!
+! IMPORTANT NOTE ON ORDERING:
+! ACLs are processed top-down, first match wins.
+! Specific permits (DHCP, DNS) must come before broad permits.
+! Broad permits (internet) must come before explicit denies to other VLANs.
+! Wait — actually the denies for internal VLANs must come BEFORE the
+! broad internet permit, because the internet permit "permit ip ... any"
+! would match internal destinations too.
+!
+! Correct order: specific internal permits → inter-VLAN denies → internet permit → deny all
+!
+! I got this wrong on the first pass (permit any came before deny rules).
+! That's documented in findings.md. The config below is the corrected version.
+! =============================================================
+
+! -----------------------------------------------------------
+! ACL 110 - Applied INBOUND on Vlan10 SVI (HR traffic)
+! Controls what HR VLAN can reach
+! -----------------------------------------------------------
+
+ip access-list extended ACL-VLAN10-IN
+
+ ! Permit DHCP (relay to server at 192.168.40.10)
+ 10 permit udp 192.168.10.0 0.0.0.255 host 192.168.40.10 eq 67
+ 20 permit udp 192.168.10.0 0.0.0.255 host 192.168.40.10 eq 68
+
+ ! Permit DNS (server at 192.168.40.20)
+ 30 permit tcp 192.168.10.0 0.0.0.255 host 192.168.40.20 eq 53
+ 40 permit udp 192.168.10.0 0.0.0.255 host 192.168.40.20 eq 53
+
+ ! Deny HR → Finance (no cross-department data access)
+ 50 deny ip 192.168.10.0 0.0.0.255 192.168.20.0 0.0.0.255
+
+ ! Deny HR → IT Admin
+ 60 deny ip 192.168.10.0 0.0.0.255 192.168.30.0 0.0.0.255
+
+ ! Deny HR → Server VLAN except permitted services above
+ 70 deny ip 192.168.10.0 0.0.0.255 192.168.40.0 0.0.0.255
+
+ ! Deny HR → Management VLAN (no switch admin access)
+ 80 deny ip 192.168.10.0 0.0.0.255 192.168.99.0 0.0.0.255
+
+ ! Permit internet-bound traffic (will be NAT'd at router)
+ 90 permit ip 192.168.10.0 0.0.0.255 any
+
+ ! Explicit deny all (implicit deny exists but logging requires explicit)
+ 100 deny ip any any log
+
+! Apply to VLAN 10 SVI
+interface Vlan10
+ ip access-group ACL-VLAN10-IN in
+
+! -----------------------------------------------------------
+! ACL 120 - Applied INBOUND on Vlan20 SVI (Finance/Marketing)
+! -----------------------------------------------------------
+
+ip access-list extended ACL-VLAN20-IN
+
+ ! DHCP relay
+ 10 permit udp 192.168.20.0 0.0.0.255 host 192.168.40.10 eq 67
+ 20 permit udp 192.168.20.0 0.0.0.255 host 192.168.40.10 eq 68
+
+ ! DNS
+ 30 permit tcp 192.168.20.0 0.0.0.255 host 192.168.40.20 eq 53
+ 40 permit udp 192.168.20.0 0.0.0.255 host 192.168.40.20 eq 53
+
+ ! File server access (SMB) - Finance needs shared drives
+ ! TODO: tighten this to specific server IPs rather than whole subnet
+ 50 permit tcp 192.168.20.0 0.0.0.255 host 192.168.40.30 eq 445
+ 60 permit tcp 192.168.20.0 0.0.0.255 host 192.168.40.30 eq 139
+
+ ! Internal web app
+ 70 permit tcp 192.168.20.0 0.0.0.255 host 192.168.40.30 eq 80
+ 80 permit tcp 192.168.20.0 0.0.0.255 host 192.168.40.30 eq 443
+
+ ! Deny Finance → HR
+ 90 deny ip 192.168.20.0 0.0.0.255 192.168.10.0 0.0.0.255
+
+ ! Deny Finance → IT Admin
+ 100 deny ip 192.168.20.0 0.0.0.255 192.168.30.0 0.0.0.255
+
+ ! Deny Finance → rest of Server VLAN (only specific servers permitted above)
+ 110 deny ip 192.168.20.0 0.0.0.255 192.168.40.0 0.0.0.255
+
+ ! Deny Finance → Management VLAN
+ 120 deny ip 192.168.20.0 0.0.0.255 192.168.99.0 0.0.0.255
+
+ ! Permit internet
+ 130 permit ip 192.168.20.0 0.0.0.255 any
+
+ 140 deny ip any any log
+
+interface Vlan20
+ ip access-group ACL-VLAN20-IN in
+
+! -----------------------------------------------------------
+! ACL 130 - Applied INBOUND on Vlan30 SVI (IT Admin)
+! IT has broadest access by necessity
+! -----------------------------------------------------------
+
+ip access-list extended ACL-VLAN30-IN
+
+ ! IT → Management VLAN (switch admin, SSH)
+ 10 permit tcp 192.168.30.0 0.0.0.255 192.168.99.0 0.0.0.255 eq 22
+ 15 permit icmp 192.168.30.0 0.0.0.255 192.168.99.0 0.0.0.255
+
+ ! IT → Servers (full admin access)
+ 20 permit ip 192.168.30.0 0.0.0.255 192.168.40.0 0.0.0.255
+
+ ! IT → HR (troubleshooting only, initiated from IT side)
+ ! "established" means IT can initiate connections, HR can't initiate back to IT
+ 30 permit tcp 192.168.30.0 0.0.0.255 192.168.10.0 0.0.0.255 established
+ 35 permit icmp 192.168.30.0 0.0.0.255 192.168.10.0 0.0.0.255
+
+ ! IT → Finance (troubleshooting)
+ 40 permit tcp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 established
+ 45 permit icmp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255
+
+ ! Internet
+ 50 permit ip 192.168.30.0 0.0.0.255 any
+
+ 60 deny ip any any log
+
+interface Vlan30
+ ip access-group ACL-VLAN30-IN in
+
+! -----------------------------------------------------------
+! ACL 140 - Applied INBOUND on Vlan40 SVI (Servers)
+! Servers initiate very little outbound traffic
+! -----------------------------------------------------------
+
+ip access-list extended ACL-VLAN40-IN
+
+ ! DHCP server responses to all client VLANs
+ 10 permit udp host 192.168.40.10 192.168.10.0 0.0.0.255 eq 68
+ 20 permit udp host 192.168.40.10 192.168.20.0 0.0.0.255 eq 68
+ 30 permit udp host 192.168.40.10 192.168.30.0 0.0.0.255 eq 68
+
+ ! DNS responses
+ 40 permit tcp host 192.168.40.20 any eq 53
+ 50 permit udp host 192.168.40.20 any eq 53
+
+ ! File server responses to Finance (established sessions)
+ 60 permit tcp host 192.168.40.30 192.168.20.0 0.0.0.255 established
+
+ ! Servers cannot reach management VLAN
+ 70 deny ip 192.168.40.0 0.0.0.255 192.168.99.0 0.0.0.255
+
+ ! Servers cannot initiate connections to user VLANs
+ 80 deny ip 192.168.40.0 0.0.0.255 192.168.10.0 0.0.0.255
+ 90 deny ip 192.168.40.0 0.0.0.255 192.168.20.0 0.0.0.255
+ 100 deny ip 192.168.40.0 0.0.0.255 192.168.30.0 0.0.0.255
+
+ ! Internet access (for updates, NTP, etc.)
+ 110 permit ip 192.168.40.0 0.0.0.255 any
+
+ 120 deny ip any any log
+
+interface Vlan40
+ ip access-group ACL-VLAN40-IN in
+
+! -----------------------------------------------------------
+! ACL 199 - Applied INBOUND on Vlan99 SVI (Management)
+! Most restrictive - only IT SSH allowed
+! -----------------------------------------------------------
+
+ip access-list extended ACL-VLAN99-IN
+
+ ! Only IT Admin VLAN can SSH to management VLAN
+ 10 permit tcp 192.168.30.0 0.0.0.255 192.168.99.0 0.0.0.255 eq 22
+
+ ! ICMP from IT for reachability checks
+ 20 permit icmp 192.168.30.0 0.0.0.255 192.168.99.0 0.0.0.255
+
+ ! Block everything else to management
+ 30 deny ip any 192.168.99.0 0.0.0.255 log
+
+ 40 deny ip any any log
+
+interface Vlan99
+ ip access-group ACL-VLAN99-IN in
+
+! -----------------------------------------------------------
+! VERIFICATION COMMANDS
+! -----------------------------------------------------------
+
+! Check ACL hit counts (run after generating test traffic)
+! show ip access-lists ACL-VLAN10-IN
+! show ip access-lists ACL-VLAN20-IN
+! show ip access-lists ACL-VLAN30-IN
+! show ip access-lists ACL-VLAN40-IN
+! show ip access-lists ACL-VLAN99-IN
+
+! Check ACL is applied to interface
+! show ip interface Vlan10
+! show ip interface Vlan20
+! (look for "Inbound access list is ACL-VLAN10-IN")
+
+! Clear hit counts between tests
+! clear ip access-list counters
