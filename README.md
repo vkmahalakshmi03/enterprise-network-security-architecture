@@ -1,5 +1,58 @@
 # Enterprise Network Security Architecture
 
+A multi-zone network security implementation covering VLAN segmentation, ACL-based traffic control, DHCP, and NAT across a simulated enterprise campus environment. Built and tested in Cisco Packet Tracer.
+
+The focus was on internal segmentation — not just getting the network up, but making sure that a compromised endpoint in one department has no lateral path to another. Perimeter firewall alone does not cover that.
+
+## Architecture Overview
+
+Three-building campus. Two 5-floor office buildings, one reception/conference building. Hybrid physical topology (star per floor, bus backbone between floors) with a three-tier logical hierarchy — core, distribution, access.
+
+Inter-VLAN routing happens at the distribution layer. ACLs are applied inbound on SVIs, so traffic is evaluated before it enters the routing process.
+
+## Segmentation Design
+
+| VLAN | Subnet | Purpose |
+|------|--------|---------|
+| 10 | 192.168.10.0/24 | HR |
+| 20 | 192.168.20.0/24 | Finance and Marketing |
+| 30 | 192.168.30.0/24 | IT and Admin |
+| 40 | 192.168.40.0/24 | Servers (DHCP, DNS, File) |
+| 99 | 192.168.99.0/24 | Management (switches) |
+
+Each VLAN maps to a real organizational boundary. HR carries PII. Finance carries transaction data. IT needs wide access but should still be isolated from user VLANs at the routing layer. Servers are their own zone — only specific ports from specific VLANs reach specific servers.
+
+Default-deny between VLANs. Explicit permits only where there is a legitimate business reason.
+
+## What Is in This Repo
+
+- configs/ — Cisco IOS configuration (VLANs, ACLs, router, DHCP/NAT)
+- docs/ — Architecture decisions, VLAN rationale, ACL logic, security analysis
+- diagrams/ — Mermaid diagrams for topology, traffic flow, security zones
+- validation/ — Test cases, expected results, and actual findings
+
+## Key Finding
+
+The most significant issue found during testing: ACL rule ordering silently broke inter-VLAN blocking. The broad internet permit rule was placed above the inter-VLAN deny rules. HR traffic to Finance was passing — the deny rule showed 0 hits, the permit was matching everything first.
+
+Fix was reordering: deny internal VLANs first, then permit internet. After correction, deny rule hit counters incremented correctly on cross-VLAN traffic.
+
+This kind of misconfiguration exists in production networks longer than it should because nothing obviously breaks — internet still works, nobody checks whether the segmentation is actually enforced.
+
+Full breakdown in validation/findings.md
+
+## Known Gaps
+
+- No guest VLAN — conference room devices share VLAN 10 with HR
+- No DHCP snooping — rogue DHCP on any VLAN goes undetected
+- No 802.1X — any device plugged in gets network access
+- No monitoring — ACL deny logging configured but no syslog destination
+- Single core switch — no redundancy at the core layer
+
+## Stack
+
+Cisco IOS · VLANs · 802.1Q Trunking · Extended ACLs · Inter-VLAN Routing (SVI) · DHCP · NAT/PAT · Cisco Packet Tracer 8.2# Enterprise Network Security Architecture
+
 **Project Period:** Aug 2024 – Dec 2024 (George Mason University – CYSE 530)  
 **Implementation Environment:** Cisco Packet Tracer 8.2  
 **Last Updated:** May 2025  
