@@ -4,11 +4,11 @@
 
 ```mermaid
 sequenceDiagram
-    participant HR as HR PC\n192.168.10.x
-    participant ACC as Access Switch\nACC-A-F1
-    participant DIST as Distribution\nDIST-A
-    participant CORE as Core Switch\nSW-CORE (L3)
-    participant RT as Core Router\nRT-CORE
+    participant HR as HR PC 192.168.10.x
+    participant ACC as Access Switch ACC-A-F1
+    participant DIST as Distribution DIST-A
+    participant CORE as Core Switch SW-CORE L3
+    participant RT as Core Router RT-CORE
     participant ISP as Internet
 
     HR->>ACC: Frame tagged VLAN 10
@@ -31,8 +31,8 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant HR as HR PC\n192.168.10.50
-    participant CORE as Core Switch\nSW-CORE (L3)
+    participant HR as HR PC 192.168.10.50
+    participant CORE as Core Switch SW-CORE L3
     participant FIN as Finance PC\n192.168.20.50
 
     HR->>CORE: Packet: src 192.168.10.50\ndst 192.168.20.50
@@ -48,9 +48,9 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant FIN as Finance PC\n192.168.20.60
-    participant CORE as Core Switch\nSW-CORE (L3)
-    participant SRV as File Server\n192.168.40.30
+    participant FIN as Finance PC 192.168.20.60
+    participant CORE as Core Switch SW-CORE L3
+    participant SRV as File Server 192.168.40.30
 
     FIN->>CORE: TCP SYN: dst 192.168.40.30 port 445
     Note over CORE: ACL-VLAN20-IN evaluated\nRule 50: permit tcp .20/24 host .40.30 eq 445\nMATCH — permitted
@@ -66,7 +66,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant PC as Finance PC\n(no IP yet)
+    participant PC as Finance PC no IP yet
     participant ACC as ACC-B-F1
     participant DIST as DIST-B
     participant CORE as SW-CORE SVI Vlan20
@@ -90,9 +90,9 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant IT as IT Admin PC\n192.168.30.10
+    participant IT as IT Admin PC 192.168.30.10
     participant CORE as SW-CORE L3
-    participant SW as Switch SVI\n192.168.99.21
+    participant SW as Switch SVI 192.168.99.21
 
     IT->>CORE: TCP SYN: dst 192.168.99.21 port 22
     Note over CORE: ACL-VLAN30-IN evaluated\nRule 10: permit tcp .30/24 .99/24 eq 22\nMATCH — permitted
@@ -107,7 +107,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant HR as HR PC\n192.168.10.50
+    participant HR as HR PC 192.168.10.50
     participant CORE as SW-CORE L3
 
     HR->>CORE: TCP SYN: dst 192.168.99.21 port 22
