@@ -1,143 +1,171 @@
 # Enterprise Network Security Architecture
 
-A multi-zone network security implementation covering VLAN segmentation, ACL-based traffic control, DHCP, and NAT across a simulated enterprise campus environment. Built and tested in Cisco Packet Tracer.
+Built a multi-zone enterprise network from scratch — VLANs, ACLs, DHCP, NAT, the whole stack — with internal segmentation as the primary design constraint, not an afterthought. Simulated in Cisco Packet Tracer across a three-building campus topology.
 
-The focus was on internal segmentation — not just getting the network up, but making sure that a compromised endpoint in one department has no lateral path to another. Perimeter firewall alone does not cover that.
+The question driving the design: if one endpoint gets compromised, how far can an attacker actually move? Most of the time the answer in enterprise environments is "pretty far" — flat networks, permissive ACLs, or VLANs that exist on paper but aren't enforced. This was built to address that.
 
-## Architecture Overview
+---
 
-Three-building campus. Two 5-floor office buildings, one reception/conference building. Hybrid physical topology (star per floor, bus backbone between floors) with a three-tier logical hierarchy — core, distribution, access.
+## The Problem I Was Solving
 
-Inter-VLAN routing happens at the distribution layer. ACLs are applied inbound on SVIs, so traffic is evaluated before it enters the routing process.
+Perimeter security stops things at the edge. It does not stop lateral movement once someone is inside. An HR workstation, a Finance file server, and a network management interface sitting on the same routable network is a segmentation failure — not a firewall gap.
+
+The design here treats every department boundary as a security boundary. Default-deny between VLANs, explicit permits only where there is a real business reason for the traffic to flow.
+
+---
+
+## Objectives
+
+- Isolate departments at the network layer so a compromised endpoint in one VLAN has no path to another
+- Apply ACL enforcement at the distribution layer, inbound on SVIs, before traffic enters the routing process
+- Centralize DHCP with per-VLAN relay rather than spinning up a server per VLAN
+- NAT at the perimeter — internal addressing stays private, all outbound traffic maps to a single WAN IP
+- Validate every security boundary with actual traffic tests, not just config review
+
+---
+
+## How I Approached It
+
+Started with the org structure and worked backwards to the network design. Three departments with meaningfully different data sensitivity levels — HR handles PII, Finance handles transaction data, IT needs privileged access to infrastructure. Those differences should be reflected in the network, not ignored.
+
+**Physical topology:** Hybrid star-bus. Star within each floor (every device to an access switch), bus backbone between floors within a building (access switches up to a distribution switch). Three distribution switches, one per building, all converging at a core L3 switch. Keeps cabling manageable and isolates floor-level failures.
+
+**Logical topology:** Three-tier hierarchy — core, distribution, access. Inter-VLAN routing lives at the distribution layer, not the core. ACLs applied inbound on SVIs at the distribution layer. The core just moves traffic between buildings fast — policy enforcement happens closer to where traffic originates.
+
+**VLAN design:** One VLAN per organizational boundary. Each VLAN got its own /24 subnet, its own DHCP pool, and its own ACL. VLAN 99 as a dedicated management VLAN for switch SVIs — completely separate from user traffic, SSH from IT only.
+
+**ACL strategy:** Named extended ACLs. Default-deny with explicit permits. Every permit has a justification. Specific service permits (DHCP, DNS, SMB to specific servers) come before broad denies, denies between internal VLANs come before the internet permit. That ordering matters more than it sounds — more on that below.
+
+---
+
+## Architecture
+
+```
+ISP
+ |
+[Firewall]
+ |
+[Core Router — NAT/PAT]
+ |
+[Core Switch L3 — Inter-VLAN Routing]
+      /          |          \
+  [Dist-A]   [Dist-B]   [Dist-C]
+  Bldg A     Bldg B     Bldg C
+     |        / \ \      / \ \
+   F1 Acc   F1  F2 ..  F1  F4  F5
+   VLAN 10  ←VLAN 20→  V20 V30 V30
+```
+
+| Layer | Device | Role |
+|-------|--------|------|
+| Edge | Firewall + Core Router 2911 | Perimeter, NAT/PAT |
+| Core | L3 Switch Cisco 3560 | Inter-building routing |
+| Distribution | Cisco 2960 × 3 | VLAN aggregation, ACL enforcement |
+| Access | Cisco 2960 × 8 | End device connectivity, port security |
+| Services | DHCP + DNS + File Server | Centralized in VLAN 40 |
+
+---
 
 ## Segmentation Design
 
-| VLAN | Subnet | Purpose |
-|------|--------|---------|
-| 10 | 192.168.10.0/24 | HR |
-| 20 | 192.168.20.0/24 | Finance and Marketing |
-| 30 | 192.168.30.0/24 | IT and Admin |
-| 40 | 192.168.40.0/24 | Servers (DHCP, DNS, File) |
-| 99 | 192.168.99.0/24 | Management (switches) |
+| VLAN | Subnet | Department | Why Separated |
+|------|--------|------------|---------------|
+| 10 | 192.168.10.0/24 | HR | PII — no path to Finance or IT |
+| 20 | 192.168.20.0/24 | Finance & Marketing | Financial data — isolated from HR and IT |
+| 30 | 192.168.30.0/24 | IT & Admin | Privileged access — widest reach by design, still isolated from user VLANs |
+| 40 | 192.168.40.0/24 | Servers | Services only — DHCP, DNS, File. No unsolicited outbound to users |
+| 99 | 192.168.99.0/24 | Management | Switch SVIs — SSH from IT only, nothing else has a path here |
 
-Each VLAN maps to a real organizational boundary. HR carries PII. Finance carries transaction data. IT needs wide access but should still be isolated from user VLANs at the routing layer. Servers are their own zone — only specific ports from specific VLANs reach specific servers.
+Trunk pruning applied on all uplinks — each trunk only carries the VLANs that have devices on the other end. Building B distribution switch never carries VLAN 30 because there are no IT devices in that building. Limits VLAN hopping surface slightly and keeps the trunk config honest.
 
-Default-deny between VLANs. Explicit permits only where there is a legitimate business reason.
+---
 
-## What Is in This Repo
+## Access Control Matrix
 
-- configs/ — Cisco IOS configuration (VLANs, ACLs, router, DHCP/NAT)
-- docs/ — Architecture decisions, VLAN rationale, ACL logic, security analysis
-- diagrams/ — Mermaid diagrams for topology, traffic flow, security zones
-- validation/ — Test cases, expected results, and actual findings
+| Source | Internet | VLAN 10 HR | VLAN 20 Finance | VLAN 30 IT | VLAN 40 Servers | VLAN 99 Mgmt |
+|--------|----------|------------|-----------------|------------|-----------------|--------------|
+| VLAN 10 HR | NAT | — | DENY | DENY | DHCP + DNS only | DENY |
+| VLAN 20 Finance | NAT | DENY | — | DENY | DHCP + DNS + SMB + HTTP | DENY |
+| VLAN 30 IT | NAT | troubleshooting only | troubleshooting only | — | full access | SSH only |
+| VLAN 40 Servers | NAT | DHCP responses | DHCP + DNS + return traffic | DHCP responses | — | DENY |
+| VLAN 99 Mgmt | NAT | DENY | DENY | full access | DENY | — |
 
-## Key Finding
+---
 
-The most significant issue found during testing: ACL rule ordering silently broke inter-VLAN blocking. The broad internet permit rule was placed above the inter-VLAN deny rules. HR traffic to Finance was passing — the deny rule showed 0 hits, the permit was matching everything first.
+## What's in This Repo
 
-Fix was reordering: deny internal VLANs first, then permit internet. After correction, deny rule hit counters incremented correctly on cross-VLAN traffic.
+| Folder | Contents |
+|--------|----------|
+| [configs/](configs/) | Cisco IOS configuration — VLANs, ACLs, router, DHCP/NAT with inline comments |
+| [docs/](docs/) | Architecture decisions, VLAN rationale, ACL logic, security analysis |
+| [diagrams/](diagrams/) | Mermaid diagrams — topology, traffic flow, security zones |
+| [validation/](validation/) | Test cases, expected results, and what actually happened |
 
-This kind of misconfiguration exists in production networks longer than it should because nothing obviously breaks — internet still works, nobody checks whether the segmentation is actually enforced.
+Good places to start:
+- [configs/acl-rules.txt](configs/acl-rules.txt) — full ACL ruleset, every decision has a comment
+- [docs/acl-strategy.md](docs/acl-strategy.md) — reasoning behind each ACL including a mistake caught during testing
+- [validation/findings.md](validation/findings.md) — what failed, why, and how it was fixed
+- [diagrams/security-zones.md](diagrams/security-zones.md) — full threat model and zone boundary map
 
-Full breakdown in validation/findings.md
+---
+
+## What I Observed
+
+**ACL ordering is a silent failure mode.**
+The broad internet permit — `permit ip ... any` — was initially placed above the inter-VLAN deny rules. HR traffic to Finance was going through. The deny rule showed 0 hits. Nothing broke visibly because internet still worked. Only caught it by checking ACL hit counters after running test traffic.
+
+This is exactly why this misconfiguration exists in production networks for months without anyone noticing. The fix was reordering — deny internal VLANs first, then permit internet. After the reorder, deny rule counters incremented correctly on cross-VLAN traffic. Full breakdown in [validation/findings.md](validation/findings.md).
+
+**Return traffic needs its own permit.**
+Extended ACLs without stateful inspection require explicit permits in both directions. Finance could send a TCP SYN to the file server but the SYN-ACK was dropped on the way back — no return permit on the server-side ACL. Added the `established` keyword to ACL-VLAN40-IN. Easy to miss when you're only thinking about the outbound direction.
+
+**DHCP relay failure is invisible.**
+Missing `ip helper-address` on the VLAN 20 SVI meant Finance devices silently fell back to APIPA (169.254.x.x). No error message, no alert — devices just didn't get addresses. Caught only during DHCP test cases, not during initial build.
+
+**Trunk pruning is an actual control, not just cleanup.**
+Building B distribution switch not carrying VLAN 30 means a device on Building B floors has no path to reach a VLAN 30 segment in Building C — that VLAN simply doesn't exist on the trunk between them. Worth verifying explicitly rather than assuming pruning config is correct.
+
+---
+## Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Intra-VLAN connectivity | pass | Conference room port sitting on VLAN 1 default — fixed |
+| Internet access via NAT | pass | NAT inside/outside were swapped on interfaces — corrected |
+| DHCP assignment all VLANs | pass | VLAN 20 missing ip helper-address — added |
+| HR → Finance blocked | pass | ACL reorder required — ordering bug, details in findings.md |
+| Finance → IT blocked | pass | — |
+| All VLANs → Mgmt blocked | pass | — |
+| IT SSH to management switches | pass | — |
+| Finance → File Server SMB | pass | Return traffic permit missing in server-side ACL — added |
+| Trunk VLAN pruning | pass | Verified via PDU testing across buildings |
+
+4 issues found and resolved during testing. None were caught by config review alone — all required generating actual traffic and checking hit counters or DHCP bindings.
+
+---
 
 ## Known Gaps
 
-- No guest VLAN — conference room devices share VLAN 10 with HR
-- No DHCP snooping — rogue DHCP on any VLAN goes undetected
-- No 802.1X — any device plugged in gets network access
-- No monitoring — ACL deny logging configured but no syslog destination
-- Single core switch — no redundancy at the core layer
+Documenting these because they're real, not because the scope ran out:
+
+- **No guest VLAN** — conference room visitor devices currently share VLAN 10 with HR. Should be a completely isolated VLAN with internet-only access and a hard deny to all internal VLANs.
+- **No DHCP snooping** — a rogue DHCP server on any VLAN goes undetected. One config block on access switches fixes this.
+- **No 802.1X** — any device plugged into an access port gets network access. Port security limits MAC count but doesn't authenticate the device.
+- **No monitoring** — ACL deny logging is configured but there is no syslog destination. In production this feeds a SIEM. Without it, denied traffic is invisible.
+- **Single core switch** — no redundancy at the core layer. HSRP or a dual-core design would address this.
+
+---
+
+## Conclusion
+
+The segmentation holds up for what it was designed to solve. A compromised HR workstation has no routable path to Finance or IT. Finance can reach its file server and DNS but nothing else in the server VLAN. The management VLAN is locked to SSH from IT only.
+
+The more useful takeaway was about validation methodology. Config review alone missed the ACL ordering bug, the missing DHCP relay, and the swapped NAT interfaces. Generating traffic and verifying hit counters caught all of them. In a production environment without that active validation, all three would have gone unnoticed — the network would have looked like it was working while the segmentation was silently broken.
+
+The gaps listed above are the next layer. This design solves the segmentation problem. DHCP snooping, 802.1X, and monitoring solve the endpoint trust and visibility problems that segmentation alone cannot address.
+
+---
 
 ## Stack
 
-Cisco IOS · VLANs · 802.1Q Trunking · Extended ACLs · Inter-VLAN Routing (SVI) · DHCP · NAT/PAT · Cisco Packet Tracer 8.2# Enterprise Network Security Architecture
-
-**Project Period:** Aug 2024 – Dec 2024 (George Mason University – CYSE 530)  
-**Implementation Environment:** Cisco Packet Tracer 8.2  
-**Last Updated:** May 2025  
-
-> **Note on timeline:** The original network design memo was written in September 2024 as part of a university module assignment. The Packet Tracer implementation, ACL configuration, and validation testing documented here was completed between October–December 2024. Diagrams were updated and this repo was formalized in early 2025.
-
----
-
-## What This Is
-
-This repo documents a multi-zone enterprise network security architecture I designed and implemented for a simulated three-building campus. The goal wasn't just to get devices talking — it was to figure out where segmentation actually matters and what breaks when you get it wrong.
-
-The scenario: a new campus with two 5-story office buildings and a 1-story reception/conference building. Around 8–12 network devices depending on how you count the topology (routers, L3 switches, access switches, firewall boundary, client segments). Four to six VLANs depending on how granular you go with the segmentation.
-
-The bigger question I was working through: most enterprise breaches don't fail at the perimeter. They fail because once someone's inside, lateral movement is easy. This design tries to address that with deliberate VLAN segmentation and layered ACL control.
-
----
-
-## Repository Layout
-
-```
-enterprise-network-security-architecture/
-├── README.md
-├── docs/
-│   ├── architecture.md          # Physical + logical topology decisions
-│   ├── vlan-design.md           # VLAN segmentation rationale
-│   ├── acl-strategy.md          # ACL rules and the thinking behind them
-│   └── security-analysis.md     # What I observed, what held up, what didn't
-├── configs/
-│   ├── vlan-config.txt          # VLAN configuration (Cisco IOS syntax)
-│   ├── acl-rules.txt            # Full ACL ruleset
-│   ├── router-config.txt        # Core router setup
-│   └── dhcp-nat-config.txt      # DHCP pools and NAT configuration
-├── diagrams/
-│   ├── topology.md              # Mermaid: physical + logical network diagram
-│   ├── traffic-flow.md          # Mermaid: inter-VLAN and inter-building flow
-│   └── security-zones.md        # Mermaid: security boundary map
-└── validation/
-    ├── test-cases.md            # What I tested and why
-    ├── expected-results.md      # What should happen
-    └── findings.md              # What actually happened
-```
-
----
-
-## Quick Summary of the Architecture
-
-| Layer | Device | Role |
-|---|---|---|
-| Internet/Edge | ISP → Firewall | Perimeter filtering |
-| Core | Core Router + Core Switch | Inter-building routing |
-| Distribution | Per-building distribution switch | VLAN aggregation + inter-VLAN routing |
-| Access | Per-floor access switch | End device connectivity |
-| Services | DHCP Server, NAT | IP management, address translation |
-
-**VLANs:**
-- VLAN 10 – HR (reception building)
-- VLAN 20 – Finance & Marketing
-- VLAN 30 – IT & Admin
-- VLAN 40 – Server/Infrastructure
-- VLAN 99 – Management (out-of-band)
-
-**Key security controls:** ACLs between VLANs, DHCP snooping conceptually applied, port security on access switches, NAT at the perimeter.
-
----
-
-## Why I Built This
-
-Coming from a 3-year background doing L2/L3 troubleshooting on HPE-Aruba enterprise environments, I'd seen a lot of network incidents where the root cause traced back to poor segmentation — either no VLANs at all, or VLANs that existed on paper but had ACLs that basically permitted everything. This project was a chance to build something from scratch with security as a first-class design concern rather than an afterthought.
-
-The Packet Tracer environment is obviously limited vs. a real deployment. There's no actual traffic generation, the firewall simulation is simplified, and you can't do real packet captures. But the configuration logic transfers — the Cisco IOS commands are the same, the VLAN tagging behavior is the same, and the ACL hit counts work the same way for validation.
-
----
-
-## Related Skills / Tools Used
-
-- Cisco IOS (Packet Tracer 8.2)
-- VLANs, 802.1Q trunking, inter-VLAN routing (Router-on-a-Stick + L3 switch SVI)
-- Extended ACLs, named ACLs
-- DHCP server configuration (Cisco IOS)
-- NAT overload (PAT)
-- Mermaid for diagrams
-
----
-
-## Disclaimer
-
-This is a lab environment. IP addresses used are RFC 1918 private ranges. No real production credentials, hostnames, or sensitive data are included anywhere in this repo.
+`Cisco IOS` `VLANs` `802.1Q Trunking` `Named Extended ACLs` `Inter-VLAN Routing (SVI)` `DHCP Relay` `NAT/PAT` `Port Security` `Cisco Packet Tracer 8.2` `Mermaid`
