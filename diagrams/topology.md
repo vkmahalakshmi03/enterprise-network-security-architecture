@@ -73,7 +73,7 @@ graph LR
     subgraph V10["VLAN 10 HR 192.168.10.0/24"]
         HR1["Reception PCs"]
         HR2["HR Printers"]
-        CONF["Conference Room\n-- should be Guest VLAN --"]
+        CONF["Conference Room note: should be Guest VLAN"]
     end
 
     subgraph V20["VLAN 20 Finance-Marketing 192.168.20.0/24"]
