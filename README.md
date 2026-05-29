@@ -42,25 +42,25 @@ Started with the org structure and worked backwards to the network design. Three
 
 **Campus:** 3 buildings — 1 reception (1 floor) + 2 office buildings (5 floors each)
 
-[ ISP ]
-                   |
-              [ Firewall ]
-                   |
-           [ Core Router ]
-           NAT/PAT · Edge
-                   |
-          [ Core Switch L3 ]
-       Inter-VLAN Routing · ACL
-      /            |            \
-[ Dist-A ]    [ Dist-B ]    [ Dist-C ]
-Building A    Building B    Building C
-     |         |  |  |  |    |  |  |  |  |
-   F1          F1 F2 F3 F4 F5  F1 F2 F3 F4 F5
- VLAN 10          VLAN 20         VLAN 20/30
-
- **Device count:** 1 core router · 1 L3 switch · 3 distribution switches · 8 access switches · 3 servers
- 
 ```
+                    [ ISP ]
+                       |
+                  [ Firewall ]
+                       |
+               [ Core Router ]
+               NAT/PAT · Edge
+                       |
+              [ Core Switch L3 ]
+           Inter-VLAN Routing · ACL
+          /            |            \
+    [ Dist-A ]    [ Dist-B ]    [ Dist-C ]
+    Building A    Building B    Building C
+         |        |  |  |  |    |  |  |  |  |
+        F1        F1 F2 F3 F4 F5  F1 F2 F3 F4 F5
+      VLAN 10        VLAN 20          VLAN 20/30
+```
+
+**Device count:** 1 core router · 1 L3 switch · 3 distribution switches · 8 access switches · 3 servers
 
 | Layer | Device | Role |
 |-------|--------|------|
@@ -129,9 +129,10 @@ Extended ACLs without stateful inspection require explicit permits in both direc
 Missing `ip helper-address` on the VLAN 20 SVI meant Finance devices silently fell back to APIPA (169.254.x.x). No error message, no alert — devices just didn't get addresses. Caught only during DHCP test cases, not during initial build.
 
 **Trunk pruning is an actual control, not just cleanup.**
-Building B distribution switch not carrying VLAN 30 means a device on Building B floors has no path to reach a VLAN 30 segment in Building C — that VLAN simply doesn't exist on the trunk between them. Worth verifying explicitly rather than assuming pruning config is correct.
+Building B distribution switch not carrying VLAN 30 means a device on Building B floors has no path to reach a VLAN 30 segment in Building C — that VLAN simply doesn't exist on the trunk between them. Worth verifying explicitly rather than assuming the pruning config is correct.
 
 ---
+
 ## Results
 
 | Test | Result | Notes |
